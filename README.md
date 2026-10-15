@@ -1,65 +1,26 @@
-# Aarvi Messaging Worker
+# Aarvi Messaging API (Render)
 
-A separate Cloudflare Worker API for Aarvi messaging, intended to run in the second Cloudflare account and use its `aarvi-messages-db` D1 database.
+This repository now contains a Node.js + Express messaging API intended for Render. It uses a separate PostgreSQL database and does not require changing the main Aarvi app repository or its `aarvi-db`.
 
-## What is included
+## Render configuration
+- Runtime: Node
+- Build command: `npm install`
+- Start command: `npm start`
+- Health check path: `/health`
 
-- Message list endpoint capped at 100 messages per request
-- Message create endpoint
-- Per-reader chat read-state endpoint
-- Unread count endpoint
-- D1 schema and indexes
-- Shared-secret authentication for server-to-server calls
-
-## Important
-
-This is a starter API and is **not yet connected to the live Aarvi app**. Do not change the original Aarvi app repository for this setup.
-
-The main Aarvi Worker must authenticate the current user and verify chat membership before forwarding requests to this service. Keep the service key only in Cloudflare Worker secrets; never put it in browser/mobile frontend code. The current API schema does not implement chat membership checks itself.
-
-## Setup
-
-1. In the second Cloudflare account, open D1 and copy the database ID for `aarvi-messages-db`.
-2. Replace `REPLACE_WITH_DATABASE_ID` in `wrangler.jsonc` with that ID.
-3. Install Wrangler and authenticate to the second Cloudflare account:
-
-   ```sh
-   npm install
-   npx wrangler login
-   npx wrangler d1 list
-   ```
-
-4. Apply the schema:
-
-   ```sh
-   npx wrangler d1 migrations apply aarvi-messages-db --remote
-   ```
-
-5. Set a strong random secret and deploy:
-
-   ```sh
-   npx wrangler secret put AARVI_SERVICE_KEY
-   npm run deploy
-   ```
-
-   Use the same secret in the main Aarvi Worker under the secret name `MESSAGING_API_KEY`, and configure the messaging Worker URL there. Never commit either secret.
+Create a separate PostgreSQL database on Render and set the web service environment variables:
+- `DATABASE_URL`: PostgreSQL Internal Database URL
+- `AARVI_SERVICE_KEY`: long random secret
+- `NODE_ENV`: `production`
 
 ## Routes
-
-Every route requires the `X-AARVI-SERVICE-KEY` header.
-
+- `GET /`
 - `GET /health`
 - `GET /api/messages?chatId=CHAT_ID&limit=100`
-- `GET /api/messages?chatId=CHAT_ID&before=ISO_TIMESTAMP&limit=100`
-- `POST /api/messages` with JSON `{ "chatId": "...", "senderId": "...", "body": "..." }`
-- `POST /api/messages/read` with JSON `{ "chatId": "...", "readerId": "..." }`
+- `POST /api/messages` body: `{"chatId":"chat-1","senderId":"user-1","body":"Hello"}`
+- `POST /api/messages/read` body: `{"chatId":"chat-1","readerId":"user-1"}`
 - `GET /api/chats/unread?readerId=USER_ID`
 
-The limit is clamped to 1–100. Existing Aarvi messages are not migrated automatically.
+All `/api/*` endpoints require `X-AARVI-SERVICE-KEY`. Never put this key in frontend/mobile code. The trusted Aarvi backend must authenticate the user and authorize chat membership before forwarding requests.
 
-## Production integration checklist
-
-- Verify chat membership in the main Worker before every message/read operation.
-- Replace the current main Worker message reads/writes with authenticated server-to-server requests to this Worker.
-- Restrict CORS to the exact app origin if browser access is ever needed. Do not expose the service key to the browser.
-- Add pagination and appropriate authorization rules for each route.
+The old Cloudflare `wrangler.jsonc` and migration files may remain in this repository but are not used by Render. Do not deploy this version to the old Cloudflare Worker expecting it to run as a D1 Worker.
