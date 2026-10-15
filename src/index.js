@@ -30,6 +30,11 @@ export default {
       return new Response(null, { status: 204, headers: corsHeaders });
     }
 
+    // Public, read-only liveness check; no database or secret is needed.
+    if (url.pathname === "/health" && request.method === "GET") {
+      return json({ ok: true, service: "aarvi-messaging-worker" });
+    }
+
     if (!env.MSG_DB) return json({ error: "MSG_DB binding is missing" }, 500);
     if (!env.AARVI_SERVICE_KEY) return json({ error: "Service key is not configured" }, 500);
 
@@ -40,10 +45,6 @@ export default {
     }
 
     try {
-      if (url.pathname === "/health" && request.method === "GET") {
-        return json({ ok: true, service: "aarvi-messaging-worker" });
-      }
-
       if (url.pathname === "/api/messages" && request.method === "GET") {
         const chatId = url.searchParams.get("chatId");
         if (!validId(chatId)) return json({ error: "Valid chatId is required" }, 400);
@@ -115,7 +116,8 @@ export default {
       }
 
       return json({ error: "Not found" }, 404);
-    } catch {
+    } catch (error) {
+      console.error("Aarvi messaging API request failed:", error);
       return json({ error: "Internal server error" }, 500);
     }
   }
