@@ -14,6 +14,7 @@ function validId(value) {
 }
 
 function constantTimeEqual(a, b) {
+  if (typeof a !== "string" || typeof b !== "string") return false;
   let diff = a.length ^ b.length;
   const max = Math.max(a.length, b.length);
   for (let i = 0; i < max; i++) {
@@ -24,27 +25,30 @@ function constantTimeEqual(a, b) {
 
 export default {
   async fetch(request, env) {
-    const url = new URL(request.url);
-
-    if (request.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: corsHeaders });
-    }
-
-    // Public, read-only liveness check; no database or secret is needed.
-    if (url.pathname === "/health" && request.method === "GET") {
-      return json({ ok: true, service: "aarvi-messaging-worker" });
-    }
-
-    if (!env.MSG_DB) return json({ error: "MSG_DB binding is missing" }, 500);
-    if (!env.AARVI_SERVICE_KEY) return json({ error: "Service key is not configured" }, 500);
-
-    // Server-to-server only: never expose this key in browser/mobile frontend code.
-    const suppliedKey = request.headers.get("X-AARVI-SERVICE-KEY") || "";
-    if (!constantTimeEqual(suppliedKey, env.AARVI_SERVICE_KEY)) {
-      return json({ error: "Unauthorized" }, 401);
-    }
-
+    // Keep the health check independent of secrets, bindings, and API helpers.
+    // This makes it possible to verify that the deployed Worker is responding.
     try {
+      const url = new URL(request.url);
+
+      if (request.method === "OPTIONS") {
+        return new Response(null, { status: 204, headers: corsHeaders });
+      }
+
+      if (url.pathname === "/health" && request.method === "GET") {
+        return new Response('{"ok":true,"service":"aarvi-messaging-worker"}', {
+          status: 200,
+          headers: corsHeaders
+        });
+      }
+
+      if (!env || !env.MSG_DB) return json({ error: "MSG_DB binding is missing" }, 500);
+      if (!env.AARVI_SERVICE_KEY) return json({ error: "Service key is not configured" }, 500);
+
+      const suppliedKey = request.headers.get("X-AARVI-SERVICE-KEY") || "";
+      if (!constantTimeEqual(suppliedKey, env.AARVI_SERVICE_KEY)) {
+        return json({ error: "Unauthorized" }, 401);
+      }
+
       if (url.pathname === "/api/messages" && request.method === "GET") {
         const chatId = url.searchParams.get("chatId");
         if (!validId(chatId)) return json({ error: "Valid chatId is required" }, 400);
@@ -117,7 +121,7 @@ export default {
 
       return json({ error: "Not found" }, 404);
     } catch (error) {
-      console.error("Aarvi messaging API request failed:", error);
+      console.error("Aarvi messaging Worker exception:", error && error.stack ? error.stack : String(error));
       return json({ error: "Internal server error" }, 500);
     }
   }
