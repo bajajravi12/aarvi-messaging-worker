@@ -1,0 +1,13 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "aarvi-messaging-api",
+  "main": "src/index.js",
+  "compatibility_date": "2026-10-15",
+  "d1_databases": [
+    {
+      "binding": "MSG_DB",
+      "database_name": "aarvi-messages-db",
+      "database_id": "REPLACE_WITH_DATABASE_ID"
+    }
+  ]
+}
