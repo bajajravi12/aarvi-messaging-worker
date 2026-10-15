@@ -17,6 +17,11 @@ app.use(cors({
   allowedHeaders: ["Content-Type", "X-AARVI-SERVICE-KEY"]
 }));
 
+if (!process.env.DATABASE_URL) {
+  console.error("DATABASE_URL is missing. Add the PostgreSQL Internal Database URL in Render → Web Service → Environment.");
+  process.exit(1);
+}
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.PGSSLMODE === "disable" ? false : { rejectUnauthorized: false },
@@ -128,6 +133,6 @@ app.use((err, _req, res, _next) => {
 const port = Number(process.env.PORT || 10000);
 initDb()
   .then(() => app.listen(port, "0.0.0.0", () => console.log(`Aarvi Messaging API listening on ${port}`)))
-  .catch(err => { console.error("Database initialization failed:", err.message); process.exit(1); });
+  .catch(err => { console.error("Database initialization failed:", err?.message || err?.code || JSON.stringify(err) || "unknown database error"); process.exit(1); });
 
 process.on("SIGTERM", async () => { await pool.end().catch(() => {}); process.exit(0); });
