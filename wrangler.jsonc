@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "aarvi-messaging-api",
+  "name": "aarvi-messaging-worker",
   "main": "src/index.js",
   "compatibility_date": "2026-10-15",
   "d1_databases": [
