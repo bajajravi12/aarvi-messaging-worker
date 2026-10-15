@@ -7,7 +7,7 @@
     {
       "binding": "MSG_DB",
       "database_name": "aarvi-messages-db",
-      "database_id": "REPLACE_WITH_DATABASE_ID"
+      "database_id": "c9026a8c-790f-4b86-89f6-caad6648b021"
     }
   ]
 }
