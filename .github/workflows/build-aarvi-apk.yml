@@ -1,0 +1,159 @@
+name: Build AARVI Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "public/manifest.webmanifest"
+      - ".github/workflows/build-aarvi-apk.yml"
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools platforms;android-36 build-tools;35.0.0"
+          accept-android-sdk-licenses: true
+
+      - name: Install Bubblewrap
+        run: npm install -g @bubblewrap/cli@1.25.0
+
+      - name: Configure Bubblewrap for CI
+        run: |
+          # Bubblewrap expects an Android command-line-tools layout with a
+          # "tools" directory inside the configured SDK root. GitHub's
+          # android-actions/setup-android keeps the tools under cmdline-tools.
+          BW_SDK="$RUNNER_TEMP/bubblewrap-android-sdk"
+          mkdir -p "$BW_SDK"
+          ln -s "$ANDROID_HOME/cmdline-tools/latest" "$BW_SDK/tools"
+          for dir in build-tools platform-tools platforms licenses; do
+            if [ -d "$ANDROID_HOME/$dir" ]; then
+              ln -s "$ANDROID_HOME/$dir" "$BW_SDK/$dir"
+            fi
+          done
+          mkdir -p "$HOME/.bubblewrap"
+          printf '%s\n' '{' '  "jdkPath": "'"$JAVA_HOME"'",' '  "androidSdkPath": "'"$BW_SDK"'"' '}' > "$HOME/.bubblewrap/config.json"
+          # Keep both Android SDK environment variables on the exact same path.
+          # AGP 8.9 rejects conflicting ANDROID_HOME and ANDROID_SDK_ROOT values.
+          echo "ANDROID_HOME=$BW_SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$BW_SDK" >> "$GITHUB_ENV"
+          echo "Bubblewrap config:"
+          cat "$HOME/.bubblewrap/config.json"
+          echo "SDK layout:"
+          ls -la "$BW_SDK"
+          ls -la "$BW_SDK/tools"
+          bubblewrap doctor
+
+      - name: Prepare TWA manifest
+        run: |
+          mkdir -p twa
+          cat > twa/twa-manifest.json <<'EOF'
+          {
+            "packageId": "com.aarvi.messenger",
+            "host": "rv.gamerlife659.workers.dev",
+            "name": "AARVI",
+            "launcherName": "AARVI",
+            "display": "standalone",
+            "orientation": "portrait-primary",
+            "themeColor": "#0f172a",
+            "backgroundColor": "#020617",
+            "navigationColor": "#020617",
+            "navigationColorDark": "#020617",
+            "startUrl": "/",
+            "iconUrl": "http://127.0.0.1:8765/icon-512.svg",
+            "maskableIconUrl": "http://127.0.0.1:8765/maskable-icon.svg",
+            "enableNotifications": true,
+            "appVersionCode": 1,
+            "appVersionName": "1.0.0",
+            "minSdkVersion": 23,
+            "signingKey": {
+              "path": "android-keystore",
+              "alias": "aarvi"
+            },
+            "shortcuts": [],
+            "generatorApp": "bubblewrap",
+            "webManifestUrl": "https://rv.gamerlife659.workers.dev/manifest.webmanifest",
+            "fullScopeUrl": "https://rv.gamerlife659.workers.dev/",
+            "additionalTrustedOrigins": [],
+            "retainedBundles": [],
+            "alphaDependencies": {
+              "enabled": false
+            },
+            "isChromeOSOnly": false,
+            "isMetaQuest": false,
+            "splashScreenFadeOutDuration": 300,
+            "fallbackType": "customtabs",
+            "features": {}
+          }
+          EOF
+
+      - name: Generate signing key
+        working-directory: twa
+        env:
+          KEYSTORE_PASSWORD: aarvi-build-keystore
+          KEY_PASSWORD: aarvi-build-keystore
+        run: |
+          keytool -genkeypair -v             -keystore android-keystore             -alias aarvi             -keyalg RSA             -keysize 2048             -validity 10000             -storepass "$KEYSTORE_PASSWORD"             -keypass "$KEY_PASSWORD"             -dname "CN=AARVI, OU=AARVI, O=AARVI, L=Jaipur, ST=Rajasthan, C=IN"
+
+      - name: Generate Android TWA project
+        run: |
+          # Bubblewrap/Jimp can fail to decode some PNG buffers in CI.
+          # Use deterministic local SVG icons instead: Bubblewrap converts SVG
+          # to a fresh PNG with its bundled resvg renderer before Jimp processes it.
+          cat > ./twa/icon-512.svg <<'EOF'
+          <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+            <defs>
+              <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="#38bdf8"/>
+                <stop offset="1" stop-color="#818cf8"/>
+              </linearGradient>
+            </defs>
+            <rect width="512" height="512" rx="112" fill="#020617"/>
+            <path d="M256 72 92 440h76l32-82h112l32 82h76L256 72Zm0 132 34 88h-68l34-88Z" fill="url(#g)"/>
+            <circle cx="256" cy="404" r="12" fill="#fff"/>
+          </svg>
+          EOF
+          cp ./twa/icon-512.svg ./twa/maskable-icon.svg
+
+          python3 -m http.server 8765 --bind 127.0.0.1 --directory ./twa >/tmp/aarvi-icon-server.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
+          sleep 1
+          curl -fsSI "http://127.0.0.1:8765/icon-512.svg"
+          curl -fsSI "http://127.0.0.1:8765/maskable-icon.svg"
+          npx @bubblewrap/cli@1.25.0 update --directory=./twa --manifest=./twa/twa-manifest.json --skipVersionUpgrade
+
+      - name: Build signed APK
+        working-directory: twa
+        env:
+          BUBBLEWRAP_KEYSTORE_PASSWORD: aarvi-build-keystore
+          BUBBLEWRAP_KEY_PASSWORD: aarvi-build-keystore
+        run: |
+          # CI must answer Bubblewrap's checksum prompt explicitly.
+          # The generated project is already based on the manifest we just updated,
+          # so do not regenerate it interactively during the build.
+          printf 'n\n' | npx @bubblewrap/cli@1.25.0 build             --manifest=./twa-manifest.json             --signingKeyPath=./android-keystore             --signingKeyAlias=aarvi
+
+      - name: Upload AARVI APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: AARVI-Android-APK
+          path: twa/app-release-signed.apk
+          if-no-files-found: error
